@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fahrradverleih – Fahrräder</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🚲 Fahrradverleih – Mitarbeiterbereich</h1>
+    <nav id="tabs"></nav>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Neues Fahrrad</h2>
+      <form id="form">
+        <div class="grid">
+          <label>Anschaffungsjahr <input type="number" id="year" min="1900" max="9999" required></label>
+          <label>Inventarnummer (Vorschlag) <input name="inventoryNo" required pattern="\d{4}-\d+"></label>
+          <label>Marke <input name="brand" required></label>
+          <label>Typ <select name="type" id="type"></select></label>
+          <label>Modell <input name="model" required></label>
+          <label>Sattelhöhe cm (min – max)
+            <span class="range"><input type="number" name="saddleMin" required min="1"><input type="number" name="saddleMax" required min="1"></span>
+          </label>
+          <label>Raddurchmesser Zoll <input type="number" name="wheelInch" step="0.5" min="1" required></label>
+        </div>
+        <div class="actions"><button>Hinzufügen</button><span id="msg" class="msg"></span></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Fahrräder im System</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Inv.-Nr.</th><th>Marke / Modell</th><th>Typ</th><th>Sattel cm</th><th>Rad</th><th>Status</th><th></th></tr></thead>
+          <tbody id="list"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("form");
+    const yearInput = document.getElementById("year");
+    const msg = document.getElementById("msg");
+
+    async function suggestNumber() {
+      const { inventoryNo } = await api("GET", "/api/bikes/next-number?year=" + yearInput.value);
+      form.inventoryNo.value = inventoryNo;
+    }
+
+    function statusHtml(b) {
+      const parts = [];
+      if (b.rentedTo) {
+        parts.push(`<span class="badge ${b.rentedTo.overdue ? "bad" : "rented"}">verliehen an ${esc(b.rentedTo.customerName)}
+          bis ${fmtUntil(b.rentedTo.until)}${b.rentedTo.overdue ? " – überfällig" : ""}</span>`);
+      }
+      if (b.reservedFrom) parts.push(`<span class="badge reserved">reserviert ab ${fmtDateTime(b.reservedFrom)}</span>`);
+      if (!b.rentedTo && !b.reservedFrom) parts.push(`<span class="badge free">verfügbar</span>`);
+      return parts.join("<br>");
+    }
+
+    async function loadList() {
+      const bikes = await api("GET", "/api/bikes");
+      document.getElementById("list").innerHTML = bikes.map((b) => `
+        <tr>
+          <td>${b.inventoryNo}</td>
+          <td>${esc(b.brand)} ${esc(b.model)}</td>
+          <td>${esc(b.type)}</td>
+          <td>${b.saddle.min} – ${b.saddle.max}</td>
+          <td>${b.wheelInch}"</td>
+          <td>${statusHtml(b)}</td>
+          <td><button class="danger" onclick="removeBike('${b.inventoryNo}')" ${b.rentedTo ? "disabled title='verliehen'" : ""}>Löschen</button></td>
+        </tr>`).join("") || `<tr><td colspan="7" class="muted">Keine Fahrräder vorhanden.</td></tr>`;
+    }
+
+    async function removeBike(no) {
+      if (!confirm(`Fahrrad ${no} wirklich löschen?`)) return;
+      try {
+        await api("DELETE", "/api/bikes/" + encodeURIComponent(no));
+        await loadList();
+        await suggestNumber();
+      } catch (e) { alert(e.message); }
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const f = form.elements;
+      try {
+        await api("POST", "/api/bikes", {
+          inventoryNo: f.inventoryNo.value.trim(),
+          brand: f.brand.value.trim(),
+          type: f.type.value,
+          model: f.model.value.trim(),
+          saddle: { min: +f.saddleMin.value, max: +f.saddleMax.value },
+          wheelInch: +f.wheelInch.value,
+        });
+        showMsg(msg, `Fahrrad ${f.inventoryNo.value} angelegt.`, true);
+        const year = yearInput.value;
+        form.reset();
+        yearInput.value = year;
+        await Promise.all([loadList(), suggestNumber()]);
+      } catch (e) { showMsg(msg, e.message); }
+    });
+
+    yearInput.addEventListener("change", suggestNumber);
+
+    (async () => {
+      const types = await api("GET", "/api/bike-types");
+      document.getElementById("type").innerHTML = types.map((t) => `<option>${esc(t)}</option>`).join("");
+      yearInput.value = new Date().getFullYear();
+      await Promise.all([suggestNumber(), loadList()]);
+    })();
+  </script>
+</body>
+</html>

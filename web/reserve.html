@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fahrradverleih – Reservierung</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header style="padding-bottom:14px">
+    <h1 style="margin:0">🚲 Fahrrad reservieren</h1>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Wer bist du?</h2>
+      <label style="max-width:360px">Name <select id="customer"></select></label>
+    </div>
+
+    <div class="card">
+      <h2>Zeitraum</h2>
+      <div class="grid" style="max-width:640px">
+        <label>Von (Tag) <input type="date" id="from"></label>
+        <label>Ab Stundenblock <select id="fromHour"></select></label>
+        <label>Bis (Tag) <input type="date" id="to"></label>
+        <label>Bis einschließlich Stundenblock <select id="toHour"></select></label>
+      </div>
+      <div class="actions"><button id="searchBtn">Freie Fahrräder suchen</button><span id="msg" class="msg"></span></div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Fahrrad</th><th>Sattel cm</th><th>Rad</th><th></th></tr></thead>
+          <tbody id="options"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Meine Reservierungen</h2>
+      <div id="mine" class="muted">Bitte zuerst Namen wählen.</div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    const customerSel = document.getElementById("customer");
+    const fromIn = document.getElementById("from");
+    const toIn = document.getElementById("to");
+    const fromHour = document.getElementById("fromHour");
+    const toHour = document.getElementById("toHour");
+    const msg = document.getElementById("msg");
+    const optionsBody = document.getElementById("options");
+
+    async function loadMine() {
+      const el = document.getElementById("mine");
+      if (!customerSel.value) { el.textContent = "Bitte zuerst Namen wählen."; return; }
+      const list = await api("GET", "/api/reservations?customerId=" + customerSel.value);
+      el.innerHTML = list.length
+        ? `<table><tr><th>Fahrrad</th><th>Von</th><th>Bis</th></tr>${list.map((r) => `
+            <tr><td>${bikeLabel(r.bike)}</td><td>${fmtDateTime(r.period.start)}</td><td>${fmtUntil(r.period.end)}</td></tr>`).join("")}</table>`
+        : "Keine Reservierungen.";
+    }
+
+    async function search() {
+      optionsBody.innerHTML = "";
+      if (!customerSel.value) return showMsg(msg, "Bitte Namen wählen.");
+      try {
+        const q = `customerId=${customerSel.value}&from=${fromIn.value}&fromHour=${fromHour.value}` +
+          `&to=${toIn.value}&toHour=${toHour.value}`;
+        const bikes = await api("GET", "/api/reservations/options?" + q);
+        showMsg(msg, "", true);
+        optionsBody.innerHTML = bikes.map((b) => `
+          <tr>
+            <td>${bikeLabel(b)}</td>
+            <td>${b.saddle.min} – ${b.saddle.max}</td>
+            <td>${b.wheelInch}"</td>
+            <td><button onclick="reserve('${b.inventoryNo}')">Reservieren</button></td>
+          </tr>`).join("") || `<tr><td colspan="4" class="muted">Kein passendes Fahrrad in diesem Zeitraum frei.</td></tr>`;
+      } catch (e) { showMsg(msg, e.message); }
+    }
+
+    async function reserve(bikeNo) {
+      try {
+        const r = await api("POST", "/api/reservations", {
+          bikeNo, customerId: +customerSel.value,
+          from: fromIn.value, fromHour: +fromHour.value, to: toIn.value, toHour: +toHour.value,
+        });
+        showMsg(msg, `Fahrrad ${bikeNo} reserviert (${fmtDateTime(r.period.start)} bis ${fmtUntil(r.period.end)}).`, true);
+        optionsBody.innerHTML = "";
+        await loadMine();
+      } catch (e) { showMsg(msg, e.message); }
+    }
+
+    document.getElementById("searchBtn").addEventListener("click", search);
+    customerSel.addEventListener("change", () => { optionsBody.innerHTML = ""; showMsg(msg, "", true); loadMine(); });
+    fromIn.addEventListener("change", () => { if (toIn.value < fromIn.value) toIn.value = fromIn.value; });
+
+    (async () => {
+      const names = await api("GET", "/api/customers/names");
+      customerSel.innerHTML = `<option value="">– bitte wählen –</option>` +
+        names.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      fromIn.min = toIn.min = isoDate(tomorrow);
+      fromIn.value = toIn.value = isoDate(tomorrow);
+      fromHour.innerHTML = toHour.innerHTML = hourOptions();
+      fromHour.value = "8";
+      toHour.value = "17";
+    })();
+  </script>
+</body>
+</html>

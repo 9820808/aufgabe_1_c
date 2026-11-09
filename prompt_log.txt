@@ -1,0 +1,161 @@
+Prompt-Log – Fahrradverleih-Backend (Aufgabe 1c)
+Datum: 2026-11-03
+Werkzeug: Claude Code (Modell: Claude Opus 5.5)
+
+Hinweis: Dieses Log wurde von Claude aus dem Gesprächsverlauf rekonstruiert.
+Benutzer-Prompts und Antworten stehen im Wortlaut. Die Werkzeugaufrufe
+(Dateien schreiben, Befehle ausführen) sind zusammengefasst, nicht als
+vollständige Terminal-Ausgabe wiedergegeben.
+
+================================================================================
+[1] BENUTZER
+================================================================================
+Du findest in CLAUDE.md und readme.md Anweisungen, um eine Web-Backend zu bauen.
+
+--------------------------------------------------------------------------------
+[1] CLAUDE – Aktionen
+--------------------------------------------------------------------------------
+- readme.md und CLAUDE.md gelesen, Go-Version geprüft (go1.24.4).
+- `go mod init fahrradverleih`, Verzeichnisse internal/domain, internal/store,
+  internal/handler, web angelegt.
+- Erstellt:
+  internal/domain/errors.go    – fachliche Fehlerarten (Invalid/NotFound/Conflict)
+  internal/domain/period.go    – Interval, Stundenblöcke, Ausleih-/Reservierungszeitraum
+  internal/domain/bike.go      – Bike, SaddleRange, Fahrradtypen, Inventarnummer
+  internal/domain/customer.go  – Customer, Ausweisart, Validierung, Sperre
+  internal/domain/booking.go   – Rental, Reservation, BikeState mit Verleih-/Reservierungsregeln
+  internal/store/store.go      – thread-sicherer In-Memory-Store (Map + RWMutex)
+  internal/handler/*.go        – JSON-API unter /api
+  main.go                      – HTTP-Server, statische Dateien aus web/, Demodaten
+  web/                         – index, bikes, customers, rent, return, reserve (.html),
+                                 app.js, style.css
+  internal/store/store_test.go – Tests der Geschäftsregeln
+- `gofmt`, `go vet`, `go test ./...` → ok
+- Server gestartet, Smoke-Test mit curl (Vorschlag für Inventarnummer,
+  Reservierungsgrenze, Pflicht Ausweisnummer/Foto, Namensliste, statische Seiten) → ok
+
+--------------------------------------------------------------------------------
+[1] CLAUDE – Antwort
+--------------------------------------------------------------------------------
+Das Backend läuft. Die 9 Tests für die Geschäftsregeln laufen durch
+(`go test ./...`). Den Server habe ich zusätzlich gestartet und die API mit
+curl getestet: Inventarnummer-Vorschlag, Grenze durch eine fremde
+Reservierung, Pflicht von Ausweisnummer oder Foto und die Namensliste
+funktionieren. Alle Seiten werden ausgeliefert. Die Oberfläche selbst habe
+ich nicht im Browser angeklickt.
+
+## Starten
+    go run .          # → http://localhost:8080
+Beim Start werden einige Beispiel-Fahrräder und -Kunden angelegt, dazu eine
+Reservierung. Mit `-demo=false` startet es leer. Da alles nur im Speicher
+liegt, sind die Daten nach einem Neustart weg.
+
+## Aufbau
+- internal/domain/: Fahrräder, Kunden, Ausleihen, Reservierungen und
+  Zeiträume. Die Regeln für Verleih und Reservierung stecken in
+  BikeState.CheckRental / CheckReservation (booking.go).
+- internal/store/: Speicher mit Map und Mutex. Prüfen und Speichern passieren
+  unter derselben Sperre, damit gleichzeitige Anfragen ein Fahrrad nicht
+  doppelt vergeben.
+- internal/handler/: JSON-API unter /api/...
+- web/: reines HTML/JS. Das Dashboard hat Tab-Reiter für Fahrräder, Kunden,
+  Verleih und Rückgabe. Die Kundenseite reserve.html ist eine eigene Seite und
+  zeigt nur Namen.
+
+## Eigene Entscheidungen
+An diesen Stellen ließ die Anforderung Spielraum. Bitte prüfen, ob es so passt:
+1. Inventarnummer im Format 2026-001: Die Nummer zählt pro Anschaffungsjahr
+   hoch und kann vor dem Speichern noch geändert werden.
+2. Sattelhöhe passt, wenn sich der Bereich des Fahrrads mit dem Wunschbereich
+   des Kunden überschneidet.
+3. Ausleihe beginnt mit der laufenden vollen Stunde und endet zur gewählten
+   Rückgabestunde. Wenn ein anderer Kunde das Rad ab dem 05.11. reserviert
+   hat, muss es spätestens am 05.11. um 00:00 zurück sein.
+4. Reservierung gilt für ganze Tage, von 00:00 des Von-Tags bis 24:00 des
+   Bis-Tags.
+5. Abholung einer Reservierung: Leiht der Kunde das Fahrrad aus, das er selbst
+   reserviert hat, bleibt seine Reservierung bestehen und begrenzt die
+   Ausleihe nicht.
+6. Ein verliehenes Fahrrad lässt sich nicht löschen. Wird ein Fahrrad
+   gelöscht, verschwinden auch seine Reservierungen.
+7. Ausweisfoto wird im Speicher abgelegt (maximal etwa 7 MB) und ist über
+   /api/customers/{id}/photo abrufbar.
+
+Nicht eingebaut ist das Stornieren von Reservierungen, weil es nicht gefordert
+war.
+
+Das Verzeichnis ist noch kein Git-Repository. Soll ich `git init` ausführen
+und einen ersten Commit machen?
+
+================================================================================
+[2] BENUTZER
+================================================================================
+1. korrekt; 2. korrekt; 3. die Reservierung ist auch im Stundenraster. Es gibt
+keine Ausleihe ab dem. 5.11., sondern nur eine Ausleihe ab dem 5.11. 8:00.
+Dann muss das Fahrrad spätestens am 5.11. um 7:59 zurückgebraucht werden.;
+4. Nein, auch Reservierungen gelten pro Stunde; 5. Korrekt; 6. Korrekt;
+7. Korrekt
+
+--------------------------------------------------------------------------------
+[2] CLAUDE – Aktionen
+--------------------------------------------------------------------------------
+- internal/domain/period.go: neue Funktionen Block(date, hour) und
+  LastMinute(end); NewRentalPeriod nimmt den Rückgabe-Stundenblock
+  einschließlich (Stunde 7 = bis 07:59); NewReservationPeriod(from, fromHour,
+  to, toHour) im Stundenraster, Bis-Block inklusive, frühestens ab morgen.
+- internal/domain/booking.go: Fehlermeldung „ist ab … reserviert – Rückgabe
+  spätestens …:59“.
+- internal/handler/bookings.go: Reservierungs-Endpunkte mit fromHour/toHour.
+- main.go: Demo-Reservierung 08:00–17:59.
+- web/app.js: fmtUntil (Ende 08:00 → 07:59), hourOptions (Stundenblöcke).
+- web/rent.html, bikes.html, index.html, return.html: Enden als „bis …:59“;
+  im Verleih wird bei reservierten Rädern der letzte erlaubte Block vorausgefüllt.
+- web/reserve.html: Von/Bis jeweils mit Tag und Stundenblock.
+- internal/store/store_test.go: Tests auf das Stundenraster umgestellt.
+- `gofmt`, `go vet`, `go test ./...` → ok
+- Smoke-Test: Rückgabe im Block 08 abgelehnt, im Block 07 angenommen;
+  stundenweise Reservierung funktioniert.
+
+--------------------------------------------------------------------------------
+[2] CLAUDE – Antwort
+--------------------------------------------------------------------------------
+Ausleihe und Reservierung laufen jetzt beide im Stundenraster. Ein
+Stundenblock zählt immer bis :59. Die Tests laufen durch, und dein Beispiel
+habe ich zusätzlich am laufenden Server geprüft. Die Oberfläche selbst habe
+ich nicht im Browser angeklickt.
+
+Dein Beispiel: Ein anderer Kunde hat das Fahrrad ab 05.11. 08:00 reserviert.
+- Rückgabe im Block 08:00–08:59 wird abgelehnt: „Fahrrad 2024-001 ist ab
+  05.11.2026 08:00 reserviert – Rückgabe spätestens 05.11.2026 07:59"
+- Rückgabe im Block 07:00–07:59 wird angenommen.
+
+Was sich geändert hat:
+- Reservierung: Man wählt Von-Tag und Stunde sowie Bis-Tag und Stunde. Die
+  Bis-Stunde ist mitgebucht: Bis 11:00 heißt bis 11:59. Reservierungen sind
+  weiterhin frühestens ab morgen möglich, dort aber zu jeder Stunde.
+- Ausleihe: Die gewählte Rückgabestunde gehört mit zur Ausleihe. Stunde 7
+  bedeutet also Rückgabe bis spätestens 07:59. Wird ein reserviertes Rad
+  ausgewählt, ist der letzte erlaubte Stundenblock schon vorausgefüllt.
+- Anzeige: Enden erscheinen überall als „bis …-07:59“, Reservierungsbeginne
+  als „reserviert ab 05.11.2026-08:00“.
+- Überfällig ist eine Ausleihe ab dem Ende ihres Rückgabeblocks, also ab
+  08:00, wenn die Rückgabe bis 07:59 vereinbart war.
+- Tests sind auf das Stundenraster umgestellt, auch für direkt
+  aufeinanderfolgende Blöcke.
+
+Die Code-Änderungen liegen vor allem in internal/domain/period.go (neu: Block,
+LastMinute, geänderte Konstruktoren für Ausleih- und Reservierungszeitraum)
+und in web/reserve.html.
+
+Das Verzeichnis ist noch kein Git-Repository. Soll ich `git init` ausführen
+und einen ersten Commit machen?
+
+================================================================================
+[3] BENUTZER
+================================================================================
+bitte schreibe das Transkript dieses Terminals in prompt_log.txt
+
+--------------------------------------------------------------------------------
+[3] CLAUDE – Aktionen
+--------------------------------------------------------------------------------
+- Diese Datei (prompt_log.txt) geschrieben.

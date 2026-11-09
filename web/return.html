@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fahrradverleih – Rückgabe</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🚲 Fahrradverleih – Mitarbeiterbereich</h1>
+    <nav id="tabs"></nav>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Rückgabe</h2>
+      <p class="muted">Kunde <em>oder</em> Fahrrad wählen – das passende Gegenstück wird angezeigt.</p>
+      <div class="two-col">
+        <label>Kunde <select id="customer"></select></label>
+        <label>Fahrrad <select id="bike"></select></label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Laufende Ausleihen</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fahrrad</th><th>Kunde</th><th>Rückgabe vereinbart</th><th></th></tr></thead>
+          <tbody id="list"></tbody>
+        </table>
+      </div>
+      <div class="actions"><span id="msg" class="msg"></span></div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    const customerSel = document.getElementById("customer");
+    const bikeSel = document.getElementById("bike");
+    const msg = document.getElementById("msg");
+    let rentals = [];
+
+    function renderList() {
+      const shown = rentals.filter((r) =>
+        (!customerSel.value || r.customerId === +customerSel.value) &&
+        (!bikeSel.value || r.bikeNo === bikeSel.value));
+      document.getElementById("list").innerHTML = shown.map((r) => `
+        <tr>
+          <td>${bikeLabel(r.bike)}</td>
+          <td>${esc(r.customerName)}</td>
+          <td><span class="badge ${r.overdue ? "bad" : "rented"}">bis ${fmtUntil(r.period.end)}${r.overdue ? " – überfällig" : ""}</span></td>
+          <td><button onclick="endRental(${r.id})">Ausleihe beenden</button></td>
+        </tr>`).join("") || `<tr><td colspan="4" class="muted">Keine laufende Ausleihe.</td></tr>`;
+    }
+
+    async function load() {
+      rentals = await api("GET", "/api/rentals");
+      const customers = new Map(rentals.map((r) => [r.customerId, r.customerName]));
+      customerSel.innerHTML = `<option value="">– alle –</option>` +
+        [...customers].map(([id, name]) => `<option value="${id}">${esc(name)}</option>`).join("");
+      bikeSel.innerHTML = `<option value="">– alle –</option>` +
+        rentals.map((r) => `<option value="${r.bikeNo}">${bikeLabel(r.bike)}</option>`).join("");
+      renderList();
+    }
+
+    // Auswahl auf einer Seite setzt die andere zurück, damit das Gegenstück angezeigt wird.
+    customerSel.addEventListener("change", () => { bikeSel.value = ""; renderList(); });
+    bikeSel.addEventListener("change", () => { customerSel.value = ""; renderList(); });
+
+    async function endRental(id) {
+      try {
+        const r = await api("POST", `/api/rentals/${id}/end`);
+        showMsg(msg, `Fahrrad ${r.bikeNo} zurückgenommen.`, true);
+        await load();
+      } catch (e) { showMsg(msg, e.message); }
+    }
+
+    load();
+  </script>
+</body>
+</html>

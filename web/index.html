@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fahrradverleih – Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🚲 Fahrradverleih – Mitarbeiterbereich</h1>
+    <nav id="tabs"></nav>
+  </header>
+  <main>
+    <div class="stats" id="stats"></div>
+    <div class="card" style="margin-top:20px">
+      <h2>Überfällige Ausleihen</h2>
+      <div id="overdue" class="muted">Lade …</div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    async function load() {
+      const [bikes, customers] = await Promise.all([api("GET", "/api/bikes"), api("GET", "/api/customers")]);
+      const rented = bikes.filter((b) => b.rentedTo);
+      const overdue = rented.filter((b) => b.rentedTo.overdue);
+      const stats = [
+        [bikes.length, "Fahrräder gesamt"],
+        [bikes.length - rented.length, "verfügbar"],
+        [rented.length, "verliehen"],
+        [bikes.filter((b) => b.reservedFrom).length, "mit Reservierung"],
+        [customers.length, "Kunden"],
+        [customers.filter((c) => c.blocked).length, "gesperrte Kunden"],
+      ];
+      document.getElementById("stats").innerHTML = stats
+        .map(([n, l]) => `<div class="stat"><div class="num">${n}</div><div class="lbl">${l}</div></div>`)
+        .join("");
+      document.getElementById("overdue").innerHTML = overdue.length
+        ? `<table><tr><th>Fahrrad</th><th>Kunde</th><th>Rückgabe fällig</th></tr>${overdue
+            .map((b) => `<tr><td>${bikeLabel(b)}</td><td>${esc(b.rentedTo.customerName)}</td>
+                         <td><span class="badge bad">${fmtUntil(b.rentedTo.until)}</span></td></tr>`)
+            .join("")}</table>`
+        : "Keine überfälligen Fahrräder.";
+    }
+    load();
+  </script>
+</body>
+</html>

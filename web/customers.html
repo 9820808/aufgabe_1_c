@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fahrradverleih – Kunden</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🚲 Fahrradverleih – Mitarbeiterbereich</h1>
+    <nav id="tabs"></nav>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Neuer Kunde</h2>
+      <form id="form">
+        <div class="grid">
+          <label>Name <input name="name" required></label>
+          <label>Telefonnummer <input name="phone" type="tel"></label>
+          <label>E-Mail <input name="email" type="email"></label>
+          <label>Anschrift <input name="address"></label>
+          <label>Ausweisart
+            <select name="docType">
+              <option value="">– keine Nummer –</option>
+              <option value="fuehrerschein">Führerschein</option>
+              <option value="pass">Pass</option>
+            </select>
+          </label>
+          <label>Führerschein-/Passnummer <input name="docNumber"></label>
+          <label>Ausweisfoto <input name="photo" type="file" accept="image/*"></label>
+          <label>Bevorzugte Sattelhöhe cm (min – max)
+            <span class="range"><input type="number" name="saddleMin" required min="1"><input type="number" name="saddleMax" required min="1"></span>
+          </label>
+        </div>
+        <p class="muted">Nummer <em>oder</em> Ausweisfoto ist Pflicht (beides möglich).</p>
+        <div class="actions"><button>Anlegen</button><span id="msg" class="msg"></span></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Kunden</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Kontakt</th><th>Anschrift</th><th>Ausweis</th><th>Sattel cm</th><th>Status</th><th></th></tr></thead>
+          <tbody id="list"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    const form = document.getElementById("form");
+    const msg = document.getElementById("msg");
+    const DOC_LABEL = { fuehrerschein: "Führerschein", pass: "Pass" };
+
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        if (!file) return resolve("");
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = () => reject(new Error("Foto konnte nicht gelesen werden"));
+        r.readAsDataURL(file);
+      });
+    }
+
+    async function loadList() {
+      const customers = await api("GET", "/api/customers");
+      document.getElementById("list").innerHTML = customers.map((c) => `
+        <tr>
+          <td>${esc(c.name)}</td>
+          <td>${esc(c.phone)}<br><span class="muted">${esc(c.email)}</span></td>
+          <td>${esc(c.address)}</td>
+          <td>${c.docNumber ? `${DOC_LABEL[c.docType]}: ${esc(c.docNumber)}` : ""}
+              ${c.hasPhoto ? `<br><a href="/api/customers/${c.id}/photo" target="_blank">Foto ansehen</a>` : ""}</td>
+          <td>${c.saddle.min} – ${c.saddle.max}</td>
+          <td>${c.blocked ? `<span class="badge bad">gesperrt</span>` : `<span class="badge free">aktiv</span>`}</td>
+          <td><button class="${c.blocked ? "secondary" : "danger"}" onclick="toggleBlock(${c.id}, ${c.blocked})">
+                ${c.blocked ? "Entsperren" : "Sperren"}</button></td>
+        </tr>`).join("") || `<tr><td colspan="7" class="muted">Keine Kunden vorhanden.</td></tr>`;
+    }
+
+    async function toggleBlock(id, blocked) {
+      try {
+        await api("POST", `/api/customers/${id}/${blocked ? "unblock" : "block"}`);
+        await loadList();
+      } catch (e) { alert(e.message); }
+    }
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const f = form.elements;
+      try {
+        await api("POST", "/api/customers", {
+          name: f.name.value.trim(),
+          phone: f.phone.value.trim(),
+          email: f.email.value.trim(),
+          address: f.address.value.trim(),
+          docType: f.docType.value,
+          docNumber: f.docNumber.value.trim(),
+          photo: await readFile(f.photo.files[0]),
+          saddle: { min: +f.saddleMin.value, max: +f.saddleMax.value },
+        });
+        showMsg(msg, `Kunde ${f.name.value} angelegt.`, true);
+        form.reset();
+        await loadList();
+      } catch (e) { showMsg(msg, e.message); }
+    });
+
+    loadList();
+  </script>
+</body>
+</html>

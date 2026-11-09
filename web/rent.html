@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fahrradverleih – Verleih</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🚲 Fahrradverleih – Mitarbeiterbereich</h1>
+    <nav id="tabs"></nav>
+  </header>
+  <main>
+    <div class="card">
+      <h2>1. Kunde wählen</h2>
+      <label style="max-width:360px">Kunde <select id="customer"></select></label>
+      <p id="customerInfo" class="muted"></p>
+    </div>
+
+    <div class="card">
+      <h2>2. Fahrrad wählen</h2>
+      <p class="muted" id="startInfo"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th></th><th>Fahrrad</th><th>Sattel cm</th><th>Rückgabe spätestens</th></tr></thead>
+          <tbody id="options"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Rückgabe festlegen</h2>
+      <div class="grid" style="max-width:480px">
+        <label>Rückgabedatum <input type="date" id="returnDate"></label>
+        <label>Rückgabe im Stundenblock <select id="returnHour"></select></label>
+      </div>
+      <div class="actions"><button id="rentBtn" disabled>Verleihen</button><span id="msg" class="msg"></span></div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+  <script>
+    const customerSel = document.getElementById("customer");
+    const msg = document.getElementById("msg");
+    const rentBtn = document.getElementById("rentBtn");
+    let customers = [];
+    let selectedBike = null;
+
+    document.getElementById("returnHour").innerHTML = hourOptions();
+
+    async function loadOptions() {
+      selectedBike = null;
+      rentBtn.disabled = true;
+      const c = customers.find((c) => c.id === +customerSel.value);
+      const info = document.getElementById("customerInfo");
+      const tbody = document.getElementById("options");
+      if (!c) { tbody.innerHTML = ""; info.textContent = ""; return; }
+      info.innerHTML = `Bevorzugte Sattelhöhe: ${c.saddle.min} – ${c.saddle.max} cm` +
+        (c.blocked ? ` <span class="badge bad">gesperrt – kein Verleih möglich</span>` : "");
+      if (c.blocked) { tbody.innerHTML = ""; return; }
+
+      const { start, options } = await api("GET", "/api/rentals/options?customerId=" + c.id);
+      document.getElementById("startInfo").textContent = `Ausleihe beginnt mit dem Stundenblock ${fmtDateTime(start)}.`;
+      tbody.innerHTML = options.map((o) => `
+        <tr data-no="${o.bike.inventoryNo}">
+          <td><input type="radio" name="bike" value="${o.bike.inventoryNo}" data-max="${o.maxReturn || ""}"></td>
+          <td>${bikeLabel(o.bike)}</td>
+          <td>${o.bike.saddle.min} – ${o.bike.saddle.max}</td>
+          <td>${o.maxReturn ? `<span class="badge reserved">${fmtUntil(o.maxReturn)}</span>` : `<span class="muted">unbegrenzt</span>`}</td>
+        </tr>`).join("") || `<tr><td colspan="4" class="muted">Kein passendes freies Fahrrad.</td></tr>`;
+      tbody.querySelectorAll("input[name=bike]").forEach((r) =>
+        r.addEventListener("change", () => {
+          selectedBike = r.value;
+          rentBtn.disabled = false;
+          if (r.dataset.max) {
+            // Letzten erlaubten Stundenblock vorschlagen (Reservierung 08:00 -> Block 07:00–07:59).
+            const last = new Date(new Date(r.dataset.max).getTime() - 3600000);
+            document.getElementById("returnDate").value = isoDate(last);
+            document.getElementById("returnHour").value = last.getHours();
+          }
+          tbody.querySelectorAll("tr").forEach((tr) => tr.classList.toggle("selected", tr.dataset.no === r.value));
+        }));
+    }
+
+    rentBtn.addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/rentals", {
+          bikeNo: selectedBike,
+          customerId: +customerSel.value,
+          returnDate: document.getElementById("returnDate").value,
+          returnHour: +document.getElementById("returnHour").value,
+        });
+        showMsg(msg, `Fahrrad ${r.bikeNo} verliehen bis ${fmtUntil(r.period.end)}.`, true);
+        await loadOptions();
+      } catch (e) { showMsg(msg, e.message); }
+    });
+
+    customerSel.addEventListener("change", () => { showMsg(msg, "", true); loadOptions(); });
+
+    (async () => {
+      customers = await api("GET", "/api/customers");
+      customerSel.innerHTML = `<option value="">– bitte wählen –</option>` +
+        customers.map((c) => `<option value="${c.id}">${esc(c.name)}${c.blocked ? " (gesperrt)" : ""}</option>`).join("");
+      const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+      document.getElementById("returnDate").value = isoDate(tomorrow);
+      document.getElementById("returnHour").value = "10";
+    })();
+  </script>
+</body>
+</html>
